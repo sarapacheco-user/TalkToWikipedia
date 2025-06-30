@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Search Assistant</title>
+    <style>
+        :root {
+            --primary-color: #4285f4;
+            --active-color: #f44336;
+            --error-color: #d32f2f;
+            --success-color: #388e3c;
+        }
+        body {
+            font-family: 'Arial', sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1 {
+            color: var(--primary-color);
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+        #recordButton {
+            display: block;
+            width: 100%;
+            padding: 12px 24px;
+            font-size: 1.1rem;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin: 0 auto;
+        }
+        #recordButton:hover {
+            background: #3367d6;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        #recordButton:active {
+            transform: translateY(0);
+        }
+        #recordButton.listening {
+            background: var(--active-color);
+            animation: pulse 1.5s infinite;
+        }
+        #response {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background: #f9f9f9;
+            min-height: 150px;
+            white-space: pre-wrap;
+        }
+        .status {
+            margin-top: 1rem;
+            padding: 0.5rem;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .error {
+            background-color: #ffebee;
+            color: var(--error-color);
+        }
+        .success {
+            background-color: #e8f5e9;
+            color: var(--success-color);
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(244, 67, 54, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
+        }
+        #loading {
+            display: none;
+            text-align: center;
+            margin: 1rem 0;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 4px solid var(--primary-color);
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <h1>Voice Search Assistant</h1>
+    <button id="recordButton">Hold to Speak</button>
+    <div id="loading">
+        <div class="spinner"></div>
+        <p>Processing your request...</p>
+    </div>
+    <div id="response">Press and hold the button to ask a question. Release when finished speaking.</div>
+    <div id="status" class="status"></div>
+
+    <script>
+    const recordButton = document.getElementById('recordButton');
+    const responseDiv = document.getElementById('response');
+    const statusDiv = document.getElementById('status');
+    const loadingDiv = document.getElementById('loading');
+    
+    let mediaRecorder;
+    let socket;
+    let audioStream;
+    let audioChunks = [];
+    let isProcessing = false;
+
+    // WebSocket connection management
+    async function connectWebSocket() {
+        return new Promise((resolve, reject) => {
+            // Clear previous connection if exists
+            if (socket) {
+                socket.close();
+            }
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.hostname === 'localhost' 
+                ? 'localhost:8001' 
+                : window.location.host;
+            
+            socket = new WebSocket(`${protocol}//${host}/ws`);
+            
+            socket.onopen = () => {
+                console.log('WebSocket connected');
+                showStatus('Connected to server', 'success');
+                resolve();
+            };
+            
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                showStatus('Connection error', 'error');
+                reject(error);
+            };
+            
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'response') {
+                        handleResponse(data.text);
+                    } else if (data.type === 'error') {
+                        handleError(data.text);
+                    }
+                } catch (error) {
+                    console.error('Error processing message:', error);
+                    handleError('Invalid server response');
+                }
+            };
+            
+            socket.onclose = () => {
+                console.log('WebSocket disconnected');
+                if (!isProcessing) {
+                    showStatus('Disconnected', 'error');
+                }
+            };
+        });
+    }
+
+    // Handle successful responses
+    function handleResponse(text) {
+        isProcessing = false;
+        loadingDiv.style.display = 'none';
+        responseDiv.textContent = text;
+        showStatus('Response received', 'success');
+        
+        // Optional: Speak the response
+        if ('speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            window.speechSynthesis.speak(utterance);
+        }
+    }
+
+    // Handle errors
+    function handleError(error) {
+        isProcessing = false;
+        loadingDiv.style.display = 'none';
+        responseDiv.textContent = `Error: ${error}`;
+        showStatus(error, 'error');
+    }
+
+    // Show status messages
+    function showStatus(message, type) {
+        statusDiv.textContent = message;
+        statusDiv.className = `status ${type}`;
+        setTimeout(() => {
+            statusDiv.textContent = '';
+            statusDiv.className = 'status';
+        }, 3000);
+    }
+
+    // Start recording
+    async function startRecording() {
+        try {
+            isProcessing = true;
+            responseDiv.textContent = 'Listening...';
+            recordButton.classList.add('listening');
+            loadingDiv.style.display = 'block';
+            
+            // Connect WebSocket
+            await connectWebSocket();
+            
+            // Get microphone access
+            audioStream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    sampleRate: 24000,
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                } 
+            });
+            
+            audioChunks = [];
+            mediaRecorder = new MediaRecorder(audioStream);
+            
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                    sendAudioChunk(event.data);
+                }
+            };
+            
+            mediaRecorder.onstop = () => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'end_of_stream' }));
+                }
+            };
+            
+            mediaRecorder.start(250); // Collect data every 250ms
+            showStatus('Recording started', 'success');
+            
+        } catch (error) {
+            console.error('Recording error:', error);
+            handleError(error.message);
+            cleanup();
+        }
+    }
+
+    // Send audio chunk to server
+    async function sendAudioChunk(audioBlob) {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            try {
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                const base64String = btoa(
+                    String.fromCharCode(...new Uint8Array(arrayBuffer))
+                );
+                socket.send(JSON.stringify({
+                    type: 'audio_chunk',
+                    audio: base64String
+                }));
+            } catch (error) {
+                console.error('Error sending audio:', error);
+            }
+        }
+    }
+
+    // Clean up resources
+    function cleanup() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+        }
+        
+        if (audioStream) {
+            audioStream.getTracks().forEach(track => track.stop());
+            audioStream = null;
+        }
+        
+        recordButton.classList.remove('listening');
+    }
+
+    // Event listeners
+    recordButton.addEventListener('mousedown', startRecording);
+    recordButton.addEventListener('mouseup', cleanup);
+    recordButton.addEventListener('mouseleave', () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            cleanup();
+        }
+    });
+    
+    // Touch support for mobile devices
+    recordButton.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        startRecording();
+    });
+    
+    recordButton.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        cleanup();
+    });
+
+    // Handle page visibility changes
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && mediaRecorder && mediaRecorder.state === 'recording') {
+            cleanup();
+        }
+    });
+    </script>
+</body>
+</html>

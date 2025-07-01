@@ -203,7 +203,7 @@
         }, 3000);
     }
 
-    // Start recording
+    // Starts recording
     async function startRecording() {
         try {
             isProcessing = true;
@@ -251,7 +251,7 @@
         }
     }
 
-    // Send audio chunk to server
+    // Sends audio chunk to server
     async function sendAudioChunk(audioBlob) {
         if (socket && socket.readyState === WebSocket.OPEN) {
             try {
@@ -303,7 +303,7 @@
         cleanup();
     });
 
-    // Handle page visibility changes
+    // Handles page visibility changes
     document.addEventListener('visibilitychange', () => {
         if (document.hidden && mediaRecorder && mediaRecorder.state === 'recording') {
             cleanup();
